@@ -101,7 +101,7 @@ The "Crosses:" cell under each attorney is free text.
 
 ### Hosting, storage, and sharing
 - **Static site on GitHub Pages**, built from a **public code repo**. No server.
-- **Tournament data lives in a separate private GitHub repo.** The app reads and writes it through the GitHub REST API (contents endpoints) using each user's **fine-grained personal access token**. The token should be scoped to that one data repo with Contents read/write only.
+- **Tournament data lives in a separate private GitHub repo, owned by a free GitHub organization** (fine-grained tokens can't reach a repo under someone else's personal account). The app reads and writes it through the GitHub REST API (contents endpoints) using each user's **fine-grained personal access token**. The token should be scoped to that one data repo with Contents read/write only.
   - Store the token only in the user's browser, never in code or commits. Provide a clear "connect / disconnect" settings screen.
   - Write a short README section for teammates covering how to get added as a collaborator on the data repo and how to create the token.
 - Several people may enter ballots **at the same time** during a tournament (e.g., one person per judge's ballot). Choose a file layout that avoids write collisions. For example: one file for tournament setup and lineups, plus **one file per ballot**. Use the file SHA that GitHub returns for optimistic concurrency. If a file changed since it was loaded, show the conflict and let the user reload or overwrite. Never silently clobber someone else's edit.
@@ -124,7 +124,7 @@ Build in phases. **At the end of each phase, stop, summarize what works, show Be
 
 1. **Model + engine.** Tournament/round/ballot/lineup data model, plus the calculation engine with tests that pass against `golden_drexel.json`. Show Ben the data model before moving on. It's the hardest thing to change later.
 2. **Local MVP.** Tournament setup, ballot entry (both orders, phone-friendly), and the results views, with data kept in the browser and JSON export/import. Deployed to GitHub Pages so Ben can try it on his phone.
-3. **Shared storage.** Read/write to the private GitHub data repo, the token settings screen, per-ballot files, conflict handling, and offline drafts.
+3. **Shared storage.** Read/write to the private GitHub data repo, the token settings screen, per-ballot files, conflict handling, and offline drafts. (Built: `src/sync/` is the UI-free engine + tests; `src/lib/sync.svelte.ts` connects it to the app; README has teammate and admin setup.)
 4. **Import/export and reports.** `.xlsx` import of old workbooks (test it on the Drexel file: imported results must match `golden_drexel.json`), `.xlsx` export, the printable report, and the normalized-deviation view.
 
 General norms:

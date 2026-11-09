@@ -9,6 +9,10 @@ export const KEYS = {
   drafts: 'mtd.drafts.v1',
   entryOrder: 'mtd.entryOrder',
   metricMode: 'mtd.metricMode',
+  /** GitHub connection, including the token. Only ever stored in this browser. */
+  github: 'mtd.github.v1',
+  /** Per shared tournament: last-seen GitHub versions and open conflicts. */
+  sync: 'mtd.sync.v1',
 } as const;
 
 export const storageStatus = { ok: true, message: '' };

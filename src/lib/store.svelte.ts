@@ -53,9 +53,9 @@ export function slugify(s: string): string {
   );
 }
 
-function uniqueTournamentId(base: string): string {
+function uniqueTournamentId(base: string, alsoTaken: (id: string) => boolean = () => false): string {
   let id = slugify(base);
-  for (let n = 2; db.tournaments[id]; n++) id = `${slugify(base)}-${n}`;
+  for (let n = 2; db.tournaments[id] || alsoTaken(id); n++) id = `${slugify(base)}-${n}`;
   return id;
 }
 
@@ -63,9 +63,10 @@ function uniqueTournamentId(base: string): string {
 
 const emptyLineup = () => ({ a1: null, a2: null, a3: null, w1: null, w2: null, w3: null });
 
-export function createTournament(name: string): string {
+/** `alsoTaken`: folder names used in the team repo, so a new shared tournament never collides. */
+export function createTournament(name: string, alsoTaken?: (id: string) => boolean): string {
   const year = new Date().getFullYear();
-  const id = uniqueTournamentId(`${year}-${name}`);
+  const id = uniqueTournamentId(`${year}-${name}`, alsoTaken);
   const rounds: Round[] = (['P', 'D', 'P', 'D'] as const).map((side, i) => ({
     number: i + 1,
     side,
@@ -104,6 +105,26 @@ export function addTournament(data: TournamentData, replace: boolean): string {
   return id;
 }
 
+/** Change a tournament's id (its folder name in the data repo). */
+export function renameTournament(oldId: string, newId: string): void {
+  const td = db.tournaments[oldId];
+  if (!td || oldId === newId) return;
+  td.tournament.id = newId;
+  db.tournaments[newId] = td;
+  delete db.tournaments[oldId];
+  for (const k of Object.keys(drafts))
+    if (k.startsWith(`${oldId}|`)) {
+      drafts[`${newId}|${k.slice(oldId.length + 1)}`] = drafts[k]!;
+      delete drafts[k];
+    }
+}
+
+export function uniqueSlug(base: string, taken: (id: string) => boolean): string {
+  let id = slugify(base);
+  for (let n = 2; taken(id); n++) id = `${slugify(base)}-${n}`;
+  return id;
+}
+
 // ------------------------------------------------------------ ballots
 
 /** The next free ballot number in a round (counting unsaved drafts too). */
@@ -117,9 +138,9 @@ export function nextSeat(td: TournamentData, round: number): number {
   return used.length ? Math.max(...used) + 1 : 1;
 }
 
-export function saveBallot(td: TournamentData, ballot: Ballot): void {
+export function saveBallot(td: TournamentData, ballot: Ballot, updatedBy?: string): void {
   const i = td.ballots.findIndex((b) => b.round === ballot.round && b.seat === ballot.seat);
-  const stamped = { ...ballot, updatedAt: new Date().toISOString() };
+  const stamped = { ...ballot, updatedAt: new Date().toISOString(), ...(updatedBy ? { updatedBy } : {}) };
   if (i >= 0) td.ballots[i] = stamped;
   else td.ballots.push(stamped);
   delete drafts[draftKey(td.tournament.id, ballot.round, ballot.seat)];

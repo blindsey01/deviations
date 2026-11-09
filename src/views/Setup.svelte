@@ -1,5 +1,6 @@
 <script lang="ts">
   import Header from '../components/Header.svelte';
+  import SyncStatus from '../components/SyncStatus.svelte';
   import TrialOrderEditor from '../components/TrialOrderEditor.svelte';
   import { validateTournament } from '../engine/validate';
   import { ATTY_SLOTS, SLOTS, SLOT_LABEL, WIT_SLOTS, type Side, type Slot } from '../model/performances';
@@ -76,6 +77,7 @@
 </script>
 
 <Header title="Setup" back={tHref(t.id)} backLabel={t.name} />
+<SyncStatus id={t.id} />
 
 {#if problems.length}
   <div class="notice"><ul>{#each problems as p (p)}<li>{p}</li>{/each}</ul></div>
@@ -97,7 +99,7 @@
       <button aria-pressed={t.pSideLabel === 'Prosecution'} onclick={() => (t.pSideLabel = 'Prosecution')}>Prosecution</button>
     </div>
   </fieldset>
-  <p class="muted small">Folder name for shared storage (Phase 3): <code>{t.id}</code></p>
+  <p class="muted small">Folder name in the team repo: <code>{t.id}</code></p>
 </section>
 
 <!-- ===================================================== roster -->

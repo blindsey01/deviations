@@ -60,6 +60,34 @@ Short record of choices and why. Newest at the bottom of each section.
 - "Combined" on a person's card only appears when they had the same role kind on both sides.
 - "Load sample" builds a tournament from the made-up `src/fixtures/synthetic.json`, so the app can be tried without typing ballots.
 
+## Shared storage (Phase 3, 2026-11-09)
+
+- **The data repo lives in a free GitHub organization, not a personal account.** Fine-grained tokens can only reach repos owned by the token holder or an organization they belong to; a collaborator on someone's personal repo can't make one for it. Each person's token: resource owner = the organization, only the data repo, **Contents: Read and write**. The Settings screen links to GitHub's token form pre-filled (owner, name, 1-year expiry, contents=write); the person still has to pick the repo, since the pre-fill can't do that.
+- **Sync engine** (`src/sync/engine.ts`) is pure and tested with a fake in-memory GitHub simulating two phones. For each file it remembers the last-seen version (SHA + text):
+  - local == last-seen: nothing to upload
+  - remote SHA changed and we didn't touch it: take theirs
+  - both changed: **conflict**; nothing is overwritten until a person chooses
+- GitHub only accepts an update that names the file's current SHA. So the check is enforced by GitHub too, not just by the app.
+- **Uploads are one file at a time.** GitHub rejects parallel writes to one repo. A 409 where the file itself is unchanged (someone else's save landed at the same instant) is retried automatically, up to 3 times.
+- **Upload order:** tournament file, then round files, then ballots. Files are written as canonical JSON (sorted keys) so identical data always gives identical text.
+- **When it syncs:**
+  - **Uploads** happen ~1 second after any change.
+  - **Downloads** happen when you open any screen of a tournament, every 60 s while the app is open, when the app returns to the foreground, and when the phone comes back online.
+  - Failed uploads don't retry in a tight loop. They wait for the next edit, the timer, or "back online".
+- **Never losing work:**
+  - **Drafts:** unsaved ballots stay on the device.
+  - **Saved but not uploaded:** those ballots are kept with the tournament on the device and upload when there's signal.
+  - **Edits made during a download** are never overwritten. The engine reads local data only after the network wait, and the same file changing on both sides becomes a conflict.
+- **Ballot save checks:**
+  - Someone else saved the same ballot number first → offer to save yours as the next number.
+  - Someone changed the ballot since you opened it → confirm before replacing theirs.
+  - A ballot you haven't touched yet refreshes to the newest version. Once you tap a field, it never changes under you.
+- **Conflict choices:** "Keep both" (ballot numbers only; yours moves to the next free number), "Use theirs", "Overwrite theirs with mine". Each shows who saved what, the points, and when.
+- **Tournaments can still be "on this device only"** (e.g. the sample, or before connecting). "Share with the team" uploads one, and asks for a new folder name if it's taken. "Remove from this device" leaves the repo copy alone. Deleting a tournament from the repo is done on GitHub, on purpose, so it's hard to do by accident.
+- **Each shared tournament remembers which repo it belongs to.** Connecting to a different repo can't mix or delete data.
+- **The token** is stored only in the browser's localStorage (key `mtd.github.v1`). Disconnect removes it, and can also remove shared tournaments from a borrowed device. The app loads no third-party scripts, which limits exposure if the page were ever compromised.
+- Commit messages name the change and the GitHub user, e.g. "Update round 1 ballot 2 (alice) via Deviations app". The repo history is the audit trail.
+
 ## Site visibility (Ben, 2026-11-09)
 
 - **The GitHub Pages site stays public.** Private Pages requires an organization on GitHub Enterprise Cloud. The site is only an app shell with no team data; data access is controlled by the private data repo plus each user's token (Phase 3). We considered Cloudflare Pages + Access and decided not to use it.

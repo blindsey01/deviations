@@ -1,11 +1,16 @@
 <script lang="ts">
+  import Conflicts from '../components/Conflicts.svelte';
   import Header from '../components/Header.svelte';
+  import SyncStatus from '../components/SyncStatus.svelte';
   import { computeTournament } from '../engine/compute';
   import { validateTournament } from '../engine/validate';
-  import { downloadText, formatDates, ourLabel, sideLabel } from '../lib/format';
+  import { downloadText, formatDates, sideLabel } from '../lib/format';
   import { toJson } from '../lib/jsonio';
   import { tHref } from '../lib/router.svelte';
-  import { draftsFor, nextSeat } from '../lib/store.svelte';
+  import { go } from '../lib/router.svelte';
+  import { draftsFor, nextSeat, renameTournament, slugify } from '../lib/store.svelte';
+  import { conn, forget, isShared, pendingCount, pendingSet, share, shared } from '../lib/sync.svelte';
+  import { ballotPath, isValidSlug } from '../sync/layout';
   import type { TournamentData } from '../model/types';
 
   let { td }: { td: TournamentData } = $props();
@@ -20,18 +25,75 @@
   function exportJson() {
     downloadText(`${id}.json`, toJson($state.snapshot(td)));
   }
+
+  const isSharedHere = $derived(isShared(id));
+  const pending = $derived(isSharedHere ? pendingSet(id) : new Set<string>());
+  const conflictPaths = $derived(new Set(Object.keys(shared[id]?.conflicts ?? {})));
+  let shareError = $state('');
+  let sharing = $state(false);
+
+  async function doShare() {
+    shareError = '';
+    sharing = true;
+    let target = id;
+    try {
+      if (!isValidSlug(target)) {
+        target = slugify(td.tournament.name);
+        renameTournament(id, target);
+      }
+      for (;;) {
+        try {
+          await share(target);
+          break;
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          if (!msg.includes('already has a tournament')) throw e;
+          const next = prompt(`${msg}
+
+New folder name (lowercase letters, numbers and dashes):`, `${target}-2`);
+          if (!next) return;
+          const clean = slugify(next);
+          renameTournament(target, clean);
+          target = clean;
+        }
+      }
+      if (target !== id) go(tHref(target).slice(1));
+    } catch (e) {
+      shareError = e instanceof Error ? e.message : String(e);
+    } finally {
+      sharing = false;
+    }
+  }
+
+  function removeFromDevice() {
+    const n = pendingCount(id);
+    const msg = n
+      ? `${n} change${n > 1 ? 's' : ''} haven't uploaded yet. Removing this tournament from the device will LOSE them. Remove anyway?`
+      : 'Remove this tournament from this device? It stays in the team repo and you can download it again.';
+    if (confirm(msg)) {
+      forget(id);
+      go('/');
+    }
+  }
 </script>
 
 <Header
   title={td.tournament.name}
   back="#/"
   backLabel="All tournaments"
-  sub={[formatDates(td.tournament.startDate, td.tournament.endDate), ourLabel(td)].filter(Boolean).join(' · ')}
+  sub={[formatDates(td.tournament.startDate, td.tournament.endDate), td.tournament.ourTeamLabel.trim()].filter(Boolean).join(' · ')}
 >
   <a class="btn primary" href={tHref(id, '/results')}>Results</a>
   <a class="btn" href={tHref(id, '/setup')}>Setup &amp; lineups</a>
   <button onclick={exportJson}>Export JSON</button>
+  {#if !isSharedHere && conn.cfg}
+    <button onclick={doShare} disabled={sharing}>{sharing ? 'Sharing…' : 'Share with the team'}</button>
+  {/if}
 </Header>
+
+<SyncStatus {id} />
+{#if shareError}<p class="notice error">{shareError}</p>{/if}
+<Conflicts {id} />
 
 {#if problems.length}
   <div class="notice">
@@ -72,6 +134,8 @@
             <span class="num">{b.ourPoints}–{b.oppPoints}</span>
             {#if !b.complete}<span class="badge warn">{b.missing.length + b.invalid.length} missing</span>{/if}
             {#if hasDraft}<span class="badge warn">unsaved edits</span>{/if}
+            {#if conflictPaths.has(ballotPath(id, r.number, b.seat))}<span class="badge L">conflict</span>
+            {:else if pending.has(ballotPath(id, r.number, b.seat))}<span class="badge">not uploaded</span>{/if}
           </a>
         </li>
       {/each}
@@ -89,6 +153,9 @@
 {/each}
 
 <p class="muted small">Need another round or a different side? Change it in Setup.</p>
+{#if isSharedHere}
+  <button class="link" onclick={removeFromDevice}>Remove from this device</button>
+{/if}
 
 <style>
   .round-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }

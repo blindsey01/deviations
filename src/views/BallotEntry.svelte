@@ -8,7 +8,8 @@
   import { ourLabel, personName, sideLabel, sideSymbol } from '../lib/format';
   import { go, tHref } from '../lib/router.svelte';
   import { KEYS, loadString, saveString } from '../lib/storage';
-  import { deleteBallot, draftKey, drafts, parseRaw, saveBallot } from '../lib/store.svelte';
+  import { deleteBallot, draftKey, drafts, nextSeat, parseRaw, saveBallot } from '../lib/store.svelte';
+  import { conn, isShared, syncNow } from '../lib/sync.svelte';
 
   let { td, round, seat }: { td: TournamentData; round: number; seat: number } = $props();
 
@@ -18,12 +19,31 @@
   const saved = untrack(() => td.ballots.find((b) => b.round === round && b.seat === seat));
   const key = untrack(() => draftKey(tid, round, seat));
   const restored = drafts[key];
+  /** The saved version this edit started from (undefined = a brand-new ballot). */
+  let startedFrom = $state(restored ? restored.baseUpdatedAt : saved?.updatedAt);
+  let refreshedNote = $state('');
 
   let judge = $state(restored?.judge ?? saved?.judge ?? '');
   let raw = $state<Partial<Record<PerfId, string>>>(
     restored ? { ...restored.raw } : Object.fromEntries(Object.entries(saved?.scores ?? {}).map(([k, v]) => [k, String(v)])),
   );
   let dirty = $state(!!restored);
+
+  // If a teammate's newer version of this ballot arrives before we've touched
+  // the form, show theirs instead of a stale copy. Once someone taps into a
+  // field we never swap the form under their fingers; Save warns instead.
+  let interacting = $state(false);
+  const live = $derived(td.ballots.find((b) => b.round === round && b.seat === seat));
+  $effect(() => {
+    const b = live;
+    if (dirty || interacting || !b || b.updatedAt === startedFrom) return;
+    untrack(() => {
+      judge = b.judge ?? '';
+      raw = Object.fromEntries(Object.entries(b.scores).map(([k, v]) => [k, String(v)]));
+      if (startedFrom) refreshedNote = `Updated to the latest version${b.updatedBy ? ` (saved by ${b.updatedBy})` : ''}.`;
+      startedFrom = b.updatedAt;
+    });
+  });
   let order = $state<'ballot' | 'sheet'>(loadString(KEYS.entryOrder) === 'sheet' ? 'sheet' : 'ballot');
   let error = $state('');
 
@@ -33,7 +53,7 @@
       judge,
       raw: { ...raw },
       updatedAt: new Date().toISOString(),
-      baseUpdatedAt: saved?.updatedAt,
+      baseUpdatedAt: startedFrom,
     };
   }
 
@@ -173,8 +193,32 @@
     }
     const missing = 28 - totals.filled;
     if (missing && !confirm(`${missing} score${missing > 1 ? 's are' : ' is'} blank. Save anyway? The ballot will be flagged as incomplete.`)) return;
-    saveBallot(td, { round, seat, judge: judge.trim() || undefined, scores: parseRaw(raw) });
+
+    // Did someone else save this ballot number while we were typing? (Their
+    // version arrives in the background from the team repo.)
+    let targetSeat = seat;
+    const current = td.ballots.find((b) => b.round === round && b.seat === seat);
+    const by = (b: typeof current) => `${b?.updatedBy ?? 'someone else'}${b?.judge ? ` (judge: ${b.judge})` : ''}`;
+    if (current && !startedFrom) {
+      const other = nextSeat(td, round);
+      if (!confirm(`Ballot ${seat} was just saved by ${by(current)}.
+
+OK = save yours as ballot ${other} instead.
+Cancel = don't save yet (your typing is kept).`)) return;
+      targetSeat = other;
+    } else if (current && current.updatedAt !== startedFrom) {
+      if (!confirm(`${by(current)} changed this ballot while you were editing it.
+
+OK = replace their version with yours.
+Cancel = don't save yet (your typing is kept).`)) return;
+    } else if (!current && startedFrom) {
+      if (!confirm('Someone else deleted this ballot while you were editing it. Save yours anyway?')) return;
+    }
+
+    saveBallot(td, { round, seat: targetSeat, judge: judge.trim() || undefined, scores: parseRaw(raw) }, conn.cfg?.login);
+    delete drafts[key];
     dirty = false;
+    if (isShared(tid)) void syncNow(tid);
     go(tHref(tid).slice(1));
   }
 
@@ -187,9 +231,12 @@
   function remove() {
     if (!confirm(`Delete ballot ${seat} of round ${round}? This can't be undone.`)) return;
     deleteBallot(td, round, seat);
+    if (isShared(tid)) void syncNow(tid);
     go(tHref(tid).slice(1));
   }
 </script>
+
+<svelte:document onfocusin={() => (interacting = true)} />
 
 {#if !roundObj}
   <p class="notice error">Round {round} isn't set up. <a href={tHref(tid, '/setup')}>Go to Setup</a></p>
@@ -201,6 +248,7 @@
     sub="{sideLabel(td, ourSide)} vs {opp}"
   />
 
+  {#if refreshedNote}<p class="notice ok">{refreshedNote}</p>{/if}
   {#if restored}
     <p class="notice">Restored your unsaved {saved ? 'changes' : 'ballot'} from {new Date(restored.updatedAt).toLocaleString()}.</p>
   {/if}
