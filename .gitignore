@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.DS_Store
+
+# Private reference material: real workbooks, the real golden file and ballot
+# photos. Ben isn't comfortable making any of it public, even anonymized.
+# It stays on his computer only. Public tests use src/fixtures/synthetic.json.
+reference/
